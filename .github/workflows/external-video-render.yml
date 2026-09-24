@@ -1,0 +1,100 @@
+name: External Video Renderer
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_url:
+        description: "HTTPS URL to an external-video/v1 JSON manifest"
+        required: true
+        type: string
+      manifest_sha256:
+        description: "Expected SHA-256 of the manifest bytes"
+        required: true
+        type: string
+      voice:
+        description: "Fallback eSpeak voice"
+        required: true
+        default: "en"
+        type: choice
+        options:
+          - en
+          - ar
+
+permissions:
+  contents: write
+
+concurrency:
+  group: external-video-render-${{ inputs.manifest_sha256 }}
+  queue: max
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout runner
+        uses: actions/checkout@v6
+
+      - name: Install renderer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng
+
+      - name: Validate manifest URL
+        env:
+          MANIFEST_URL: ${{ inputs.manifest_url }}
+        run: |
+          python - <<'PY'
+          import os, urllib.parse
+          u = urllib.parse.urlparse(os.environ["MANIFEST_URL"])
+          if u.scheme != "https" or not u.netloc or u.fragment:
+              raise SystemExit("manifest_url must be HTTPS and contain no fragment")
+          PY
+
+      - name: Download and verify manifest
+        env:
+          MANIFEST_URL: ${{ inputs.manifest_url }}
+          EXPECTED_SHA256: ${{ inputs.manifest_sha256 }}
+        run: |
+          python - <<'PY'
+          import hashlib, os, urllib.request
+          url=os.environ["MANIFEST_URL"]
+          req=urllib.request.Request(url,headers={"User-Agent":"external-video-runner/1"})
+          with urllib.request.urlopen(req,timeout=30) as r:
+              data=r.read(5*1024*1024+1)
+          if len(data)>5*1024*1024:
+              raise SystemExit("manifest too large")
+          actual=hashlib.sha256(data).hexdigest()
+          expected=os.environ["EXPECTED_SHA256"].lower().strip()
+          if actual!=expected:
+              raise SystemExit(f"manifest sha256 mismatch: {actual}")
+          open("manifest.json","wb").write(data)
+          PY
+
+      - name: Validate manifest schema
+        run: |
+          python - <<'PY'
+          import json
+          m=json.load(open("manifest.json",encoding="utf-8"))
+          if m.get("schema")!="external-video/v1":
+              raise SystemExit("unsupported schema")
+          if not isinstance(m.get("scenes"),list) or not m["scenes"]:
+              raise SystemExit("scenes are required")
+          PY
+
+      - name: Render MP4
+        run: |
+          python video-runner/render.py --manifest manifest.json --output output.mp4 | tee render-result.json
+
+      - name: Create public release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="video-${{ github.run_id }}"
+          gh release create "$TAG" output.mp4 --title "Rendered video ${{ github.run_id }}" --notes-file render-result.json
+
+      - name: Print release URL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "video-${{ github.run_id }}" --json url --jq .url
