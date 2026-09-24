@@ -24,7 +24,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: external-video-render-${ inputs.manifest_sha256 }}
+  group: external-video-render-${{ inputs.manifest_sha256 }}
   queue: max
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
 
       - name: Validate manifest URL
         env:
-          MANIFEST_URL: ${ inputs.manifest_url }}
+          MANIFEST_URL: ${{ inputs.manifest_url }}
         run: |
           python - <<'PY'
           import os, urllib.parse
@@ -53,8 +53,8 @@ jobs:
 
       - name: Download and verify manifest
         env:
-          MANIFEST_URL: ${ inputs.manifest_url }}
-          EXPECTED_SHA256: ${ inputs.manifest_sha256 }}
+          MANIFEST_URL: ${{ inputs.manifest_url }}
+          EXPECTED_SHA256: ${{ inputs.manifest_sha256 }}
         run: |
           python - <<'PY'
           import hashlib, os, urllib.request
@@ -88,13 +88,13 @@ jobs:
 
       - name: Create public release asset
         env:
-          GH_TOKEN: ${ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="video-${ github.run_id }}"
-          gh release create "$TAG" output.mp4 --title "Rendered video ${ github.run_id }}" --notes-file render-result.json
+          TAG="video-${{ github.run_id }}"
+          gh release create "$TAG" output.mp4 --title "Rendered video ${{ github.run_id }}" --notes-file render-result.json
 
       - name: Print release URL
         env:
-          GH_TOKEN: ${ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "video-${ github.run_id }}" --json url --jq .url
+          gh release view "video-${{ github.run_id }}" --json url --jq .url
